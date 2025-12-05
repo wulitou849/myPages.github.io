@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 移动端视口配置：适配刘海屏/全面屏，禁止缩放 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>3D粒子相片挂钩 - 炫酷版</title>
+    <style>
+        /* 使用视口单位（vw/vh）实现完全响应式布局 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh; /* 动态视口高度，适配移动端浏览器地址栏 */
+            overflow: hidden;
+            background: #000;
+            touch-action: none; /* 禁止默认触摸行为（滚动、缩放等） */
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            /* 适配刘海屏：使用安全区域 */
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+        }
+
+        /* 3D画布容器：占满屏幕可视区域（顶部留按钮空间） */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            z-index: 1;
+        }
+
+        /* 顶部控制栏：使用vw单位，适配各种屏幕 */
+        #control-panel {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            z-index: 100;
+            background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            padding: 2.5vw;
+            padding-top: calc(2.5vw + env(safe-area-inset-top));
+            display: flex;
+            flex-direction: column;
+            gap: 2.5vw; /* 按钮间距≥10px */
+            align-items: center;
+        }
+
+        /* 上传按钮：最小44px高度（符合移动端触控标准） */
+        .btn {
+            min-height: 12vw; /* 在360px屏幕上≈43px，在更大屏幕上更大 */
+            min-width: 12vw;
+            padding: 2.5vw 5vw;
+            border: none;
+            border-radius: 6vw;
+            font-size: 4vw;
+            font-weight: bold;
+            color: #fff;
+            cursor: pointer;
+            outline: none;
+            transition: transform 0.1s, opacity 0.2s;
+            touch-action: manipulation; /* 优化触摸响应 */
+            user-select: none;
+            -webkit-tap-highlight-color: transparent; /* 移除点击高亮 */
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+            opacity: 0.8;
+        }
+
+        /* 上传按钮样式 */
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 0.5vw 2vw rgba(102, 126, 234, 0.4);
+        }
+
+        /* 参数调节按钮组 */
+        .param-group {
+            display: flex;
+            gap: 2.5vw;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .param-btn {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border: 0.3vw solid rgba(255, 255, 255, 0.3);
+        }
+
+        .param-btn.active {
+            background: rgba(102, 126, 234, 0.6);
+            border-color: rgba(102, 126, 234, 0.8);
+        }
+
+        /* 隐藏文件输入 */
+        input[type="file"] {
+            display: none;
+        }
+
+        /* 加载提示 */
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 4vw;
+            text-align: center;
+            z-index: 200;
+            display: none;
+            pointer-events: none;
+            text-shadow: 0 0 2vw rgba(102, 126, 234, 0.8);
+        }
+
+        /* 操作提示（首次使用时显示） */
+        #hint {
+            position: fixed;
+            bottom: 5vh;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 3vw;
+            text-align: center;
+            z-index: 50;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 2vw 4vw;
+            border-radius: 4vw;
+            backdrop-filter: blur(10px);
+        }
+
+        /* 粒子数量显示 */
+        #particle-count {
+            position: fixed;
+            top: 15vh;
+            right: 2.5vw;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 3vw;
+            z-index: 50;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 3D画布容器 -->
+    <div id="canvas-container"></div>
+
+    <!-- 顶部控制面板 -->
+    <div id="control-panel">
+        <!-- 图片上传按钮 -->
+        <label class="btn upload-btn" for="imageInput">
+            📷 选择照片
+        </label>
+        <input type="file" id="imageInput" accept="image/*" capture="environment">
+        
+        <!-- 参数调节按钮组 -->
+        <div class="param-group">
+            <button class="btn param-btn" data-param="particles" data-value="1000">1000粒子</button>
+            <button class="btn param-btn" data-param="particles" data-value="2000">2000粒子</button>
+            <button class="btn param-btn active" data-param="particles" data-value="3000">3000粒子</button>
+        </div>
+    </div>
+
+    <!-- 加载提示 -->
+    <div id="loading">正在解析图片...</div>
+
+    <!-- 操作提示 -->
+    <div id="hint">
+        👆 单指拖拽旋转 | 🤏 双指缩放 | ⏸️ 长按暂停
+    </div>
+
+    <!-- 粒子数量显示 -->
+    <div id="particle-count">粒子: 3000</div>
+
+    <!-- Three.js库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // ==================== 设备性能检测 ====================
+        function detectDevicePerformance() {
+            // 检测硬件并发数、内存等指标
+            const cores = navigator.hardwareConcurrency || 4;
+            const memory = navigator.deviceMemory || 4; // GB
+            const pixelRatio = window.devicePixelRatio || 1;
+            
+            // 性能分级：high/medium/low
+            let performance = 'medium';
+            if (cores >= 8 && memory >= 6 && pixelRatio >= 2) {
+                performance = 'high';
+            } else if (cores <= 4 || memory <= 3) {
+                performance = 'low';
+            }
+            
+            return {
+                level: performance,
+                cores: cores,
+                memory: memory,
+                pixelRatio: pixelRatio
+            };
+        }
+
+        const devicePerf = detectDevicePerformance();
+        console.log('设备性能:', devicePerf);
+
+        // ==================== 移动端配置 ====================
+        const CONFIG = {
+            // 粒子数量配置（可调节）
+            particleCount: 3000,
+            minParticles: 1000,
+            maxParticles: 3000,
+            
+            // 性能优化：图片压缩尺寸
+            imageMaxSize: 150,
+            
+            // 3D场景配置
+            cameraDistance: 400,
+            particleSize: 3.0,
+            sphereRadius: 150,
+            
+            // 交互参数
+            rotationSpeed: 0.5,
+            zoomSpeed: 0.1,
+            longPressDelay: 500,
+            
+            // 动画参数
+            autoRotateSpeed: 0.003,
+            breathingSpeed: 0.002,
+            breathingRange: 0.05,
+            
+            // 特效开关（根据设备性能）
+            enableTrail: devicePerf.level !== 'low', // 拖尾残影
+            enableNeonOutline: devicePerf.level !== 'low', // 霓虹描边
+            enableStarField: true, // 星空底纹（低配也开启，数量少）
+            enableTwinkle: true, // 闪烁效果
+            enableLayers: true, // Z轴分层
+            
+            // 特效参数
+            trailCount: 3, // 残影数量
+            trailFade: 0.3, // 残影衰减
+            neonOutlineBrightness: 1.3, // 霓虹描边亮度倍数
+            twinkleRatio: 0.1, // 闪烁粒子比例
+            layerCount: 10, // Z轴层数
+            maxBrightness: 0.8, // 最大亮度（避免过曝）
+            starFieldCount: devicePerf.level === 'high' ? 500 : 200, // 星空粒子数
+            
+            // 动画时长（性能优化）
+            colorTransition: 0.1, // 色彩过渡时间
+            zoomAnimation: 0.2, // 缩放动画时间
+            explosionDuration: 0.3, // 爆炸动画时间
+            loadAnimation: 1.0 // 加载动画时间
+        };
+
+        // ==================== 全局变量 ====================
+        let scene, camera, renderer, particlesMesh, starFieldMesh;
+        let particleData = []; // 粒子数据数组
+        let starFieldData = []; // 星空底纹数据
+        let isPaused = false;
+        let time = 0;
+        let lastFrameTime = performance.now();
+        let animationState = {
+            isExploding: false,
+            explosionTime: 0,
+            isLoading: false,
+            loadTime: 0,
+            zoomTarget: null,
+            zoomStart: null,
+            zoomTime: 0
+        };
+
+        // 触摸交互状态
+        let touchState = {
+            isDragging: false,
+            isZooming: false,
+            lastTouchX: 0,
+            lastTouchY: 0,
+            lastDistance: 0,
+            longPressTimer: null,
+            touches: [],
+            dragVelocity: { x: 0, y: 0 }, // 拖拽速度（用于残影）
+            lastDragTime: 0
+        };
+
+        // 拖尾残影系统
+        let trailSystem = {
+            trails: [], // 残影数组
+            maxTrails: CONFIG.trailCount
+        };
+
+        // DOM元素
+        const canvasContainer = document.getElementById('canvas-container');
+        const imageInput = document.getElementById('imageInput');
+        const loadingDiv = document.getElementById('loading');
+        const hintDiv = document.getElementById('hint');
+        const particleCountDiv = document.getElementById('particle-count');
+
+        // ==================== 工具函数 ====================
+        // 线性插值函数（兼容Three.js r128）
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        // RGB转HSV
+        function rgbToHsv(r, g, b) {
+            r /= 255; g /= 255; b /= 255;
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            
+            let h = 0;
+            if (delta !== 0) {
+                if (max === r) h = ((g - b) / delta) % 6;
+                else if (max === g) h = (b - r) / delta + 2;
+                else h = (r - g) / delta + 4;
+            }
+            h = Math.round(h * 60);
+            if (h < 0) h += 360;
+            
+            const s = max === 0 ? 0 : delta / max;
+            const v = max;
+            
+            return { h, s, v };
+        }
+
+        // HSV转RGB
+        function hsvToRgb(h, s, v) {
+            const c = v * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = v - c;
+            
+            let r, g, b;
+            if (h < 60) { r = c; g = x; b = 0; }
+            else if (h < 120) { r = x; g = c; b = 0; }
+            else if (h < 180) { r = 0; g = c; b = x; }
+            else if (h < 240) { r = 0; g = x; b = c; }
+            else if (h < 300) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+            
+            return {
+                r: Math.min(1, (r + m) * CONFIG.maxBrightness),
+                g: Math.min(1, (g + m) * CONFIG.maxBrightness),
+                b: Math.min(1, (b + m) * CONFIG.maxBrightness)
+            };
+        }
+
+        // 检测是否为轮廓边缘（简化版：基于相邻像素差异）
+        function isEdgePixel(imageData, x, y, width, height, threshold = 30) {
+            if (x === 0 || y === 0 || x === width - 1 || y === height - 1) return true;
+            
+            const idx = (y * width + x) * 4;
+            const r = imageData[idx];
+            const g = imageData[idx + 1];
+            const b = imageData[idx + 2];
+            const a = imageData[idx + 3];
+            
+            if (a < 128) return false; // 透明区域不算边缘
+            
+            // 检查上下左右四个方向的像素差异
+            const neighbors = [
+                { x: x - 1, y }, { x: x + 1, y },
+                { x, y: y - 1 }, { x, y: y + 1 }
+            ];
+            
+            for (const n of neighbors) {
+                if (n.x < 0 || n.x >= width || n.y < 0 || n.y >= height) continue;
+                const nIdx = (n.y * width + n.x) * 4;
+                const nr = imageData[nIdx];
+                const ng = imageData[nIdx + 1];
+                const nb = imageData[nIdx + 2];
+                
+                const diff = Math.abs(r - nr) + Math.abs(g - ng) + Math.abs(b - nb);
+                if (diff > threshold) return true;
+            }
+            
+            return false;
+        }
+
+        // ==================== 初始化 ====================
+        function init() {
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+            
+            // 创建相机
+            const aspect = window.innerWidth / window.innerHeight;
+            camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 2000);
+            camera.position.z = CONFIG.cameraDistance;
+
+            // 创建渲染器（GPU优化）
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: devicePerf.level === 'high',
+                alpha: true,
+                powerPreference: devicePerf.level === 'high' ? "high-performance" : "low-power"
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, devicePerf.level === 'high' ? 2 : 1.5));
+            canvasContainer.appendChild(renderer.domElement);
+
+            // 事件监听
+            window.addEventListener('resize', onWindowResize);
+            imageInput.addEventListener('change', handleImageUpload);
+            document.querySelectorAll('.param-btn').forEach(btn => {
+                btn.addEventListener('click', handleParamChange);
+            });
+
+            // 触摸和鼠标事件
+            setupTouchEvents();
+            setupMouseEvents();
+
+            // 创建星空底纹
+            if (CONFIG.enableStarField) {
+                createStarField();
+            }
+
+            // 创建默认粒子效果
+            createDefaultParticles();
+            
+            // 启动动画循环
+            animate();
+            
+            // 3秒后隐藏提示
+            setTimeout(() => {
+                hintDiv.style.opacity = '0';
+                setTimeout(() => hintDiv.style.display = 'none', 500);
+            }, 3000);
+        }
+
+        // ==================== 创建星空底纹 ====================
+        function createStarField() {
+            const positions = [];
+            const colors = [];
+            const count = CONFIG.starFieldCount;
+            
+            for (let i = 0; i < count; i++) {
+                // 随机分布在更大的球面上
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const radius = CONFIG.sphereRadius * 2.5;
+                
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.sin(phi) * Math.sin(theta);
+                const z = radius * Math.cos(phi);
+                
+                positions.push(x, y, z);
+                
+                // 低亮度白色/蓝色
+                const brightness = 0.1 + Math.random() * 0.2;
+                colors.push(brightness, brightness * 0.8, brightness);
+                
+                starFieldData.push({ x, y, z });
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            
+            const material = new THREE.PointsMaterial({
+                size: 1.5,
+                map: createGlowTexture(),
+                vertexColors: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.3
+            });
+            
+            starFieldMesh = new THREE.Points(geometry, material);
+            scene.add(starFieldMesh);
+        }
+
+        // ==================== 触摸事件处理 ====================
+        function setupTouchEvents() {
+            renderer.domElement.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                touchState.touches = Array.from(e.touches);
+                
+                if (e.touches.length === 1) {
+                    touchState.isDragging = true;
+                    touchState.lastTouchX = e.touches[0].clientX;
+                    touchState.lastTouchY = e.touches[0].clientY;
+                    touchState.lastDragTime = performance.now();
+                    touchState.dragVelocity = { x: 0, y: 0 };
+                    
+                    touchState.longPressTimer = setTimeout(() => {
+                        handleLongPress(e.touches[0]);
+                    }, CONFIG.longPressDelay);
+                } else if (e.touches.length === 2) {
+                    touchState.isDragging = false;
+                    touchState.isZooming = true;
+                    clearTimeout(touchState.longPressTimer);
+                    
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    touchState.lastDistance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // 缩放动画开始
+                    animationState.zoomStart = camera.position.length();
+                }
+            }, { passive: false });
+
+            renderer.domElement.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                touchState.touches = Array.from(e.touches);
+                
+                if (touchState.isDragging && e.touches.length === 1) {
+                    clearTimeout(touchState.longPressTimer);
+                    
+                    const now = performance.now();
+                    const deltaTime = (now - touchState.lastDragTime) / 1000;
+                    const deltaX = e.touches[0].clientX - touchState.lastTouchX;
+                    const deltaY = e.touches[0].clientY - touchState.lastTouchY;
+                    
+                    // 计算拖拽速度（用于残影）
+                    if (deltaTime > 0) {
+                        touchState.dragVelocity.x = deltaX / deltaTime;
+                        touchState.dragVelocity.y = deltaY / deltaTime;
+                    }
+                    
+                    // 旋转相机
+                    const spherical = new THREE.Spherical();
+                    spherical.setFromVector3(camera.position);
+                    spherical.theta -= deltaX * CONFIG.rotationSpeed * 0.01;
+                    spherical.phi += deltaY * CONFIG.rotationSpeed * 0.01;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+                    
+                    camera.position.setFromSpherical(spherical);
+                    camera.lookAt(0, 0, 0);
+                    
+                    // 添加拖尾残影
+                    if (CONFIG.enableTrail && Math.abs(deltaX) + Math.abs(deltaY) > 2) {
+                        addTrail();
+                    }
+                    
+                    touchState.lastTouchX = e.touches[0].clientX;
+                    touchState.lastTouchY = e.touches[0].clientY;
+                    touchState.lastDragTime = now;
+                } else if (touchState.isZooming && e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    const delta = touchState.lastDistance - distance;
+                    const newDistance = camera.position.length() + delta * CONFIG.zoomSpeed;
+                    const clampedDistance = Math.max(200, Math.min(800, newDistance));
+                    
+                    animationState.zoomTarget = clampedDistance;
+                    animationState.zoomTime = 0;
+                    
+                    camera.position.normalize().multiplyScalar(clampedDistance);
+                    camera.lookAt(0, 0, 0);
+                    
+                    touchState.lastDistance = distance;
+                }
+            }, { passive: false });
+
+            renderer.domElement.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                clearTimeout(touchState.longPressTimer);
+                
+                if (e.touches.length === 0) {
+                    touchState.isDragging = false;
+                    touchState.isZooming = false;
+                    touchState.touches = [];
+                    touchState.dragVelocity = { x: 0, y: 0 };
+                } else if (e.touches.length === 1) {
+                    touchState.isZooming = false;
+                    touchState.isDragging = true;
+                    touchState.lastTouchX = e.touches[0].clientX;
+                    touchState.lastTouchY = e.touches[0].clientY;
+                }
+            }, { passive: false });
+        }
+
+        // ==================== 长按处理（聚拢+爆炸） ====================
+        function handleLongPress(touch) {
+            togglePause();
+            
+            if (!isPaused) {
+                // 长按点转换为3D坐标
+                const vector = new THREE.Vector3();
+                vector.set(
+                    (touch.clientX / window.innerWidth) * 2 - 1,
+                    -(touch.clientY / window.innerHeight) * 2 + 1,
+                    0.5
+                );
+                vector.unproject(camera);
+                const dir = vector.sub(camera.position).normalize();
+                const distance = -camera.position.z / dir.z;
+                const pos = camera.position.clone().add(dir.multiplyScalar(distance));
+                
+                // 触发聚拢动画
+                startGatherAnimation(pos);
+            }
+        }
+
+        // ==================== 聚拢动画 ====================
+        function startGatherAnimation(targetPos) {
+            // 保存原始位置
+            particleData.forEach(p => {
+                p.gatherTarget = targetPos.clone();
+                p.gatherStart = new THREE.Vector3(p.baseX, p.baseY, p.baseZ);
+                p.gatherTime = 0;
+            });
+            
+            // 开始聚拢
+            const gatherDuration = 0.3;
+            const startTime = performance.now();
+            
+            function gatherStep() {
+                const elapsed = (performance.now() - startTime) / 1000;
+                const progress = Math.min(1, elapsed / gatherDuration);
+                
+                // 缓动函数（easeOut）
+                const eased = 1 - Math.pow(1 - progress, 3);
+                
+                particleData.forEach(p => {
+                    if (p.gatherTarget) {
+                        p.x = lerp(p.gatherStart.x, p.gatherTarget.x, eased);
+                        p.y = lerp(p.gatherStart.y, p.gatherTarget.y, eased);
+                        p.z = lerp(p.gatherStart.z, p.gatherTarget.z, eased);
+                    }
+                });
+                
+                if (progress < 1) {
+                    requestAnimationFrame(gatherStep);
+                } else {
+                    // 聚拢完成，开始爆炸
+                    startExplosionAnimation();
+                }
+            }
+            
+            gatherStep();
+        }
+
+        // ==================== 爆炸动画 ====================
+        function startExplosionAnimation() {
+            animationState.isExploding = true;
+            animationState.explosionTime = 0;
+            
+            particleData.forEach(p => {
+                p.explosionVelocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 20,
+                    (Math.random() - 0.5) * 20,
+                    (Math.random() - 0.5) * 20
+                );
+                p.explosionStart = new THREE.Vector3(p.x, p.y, p.z);
+            });
+        }
+
+        // ==================== 拖尾残影系统 ====================
+        function addTrail() {
+            if (!CONFIG.enableTrail || !particlesMesh) return;
+            
+            // 创建残影副本
+            const trail = {
+                mesh: particlesMesh.clone(),
+                opacity: 0.5,
+                time: 0
+            };
+            
+            // 应用当前粒子位置
+            const positions = particlesMesh.geometry.attributes.position.array;
+            trail.mesh.geometry.attributes.position.array = new Float32Array(positions);
+            trail.mesh.geometry.attributes.position.needsUpdate = true;
+            
+            // 调整材质透明度
+            trail.mesh.material = trail.mesh.material.clone();
+            trail.mesh.material.opacity = 0.5;
+            
+            scene.add(trail.mesh);
+            trailSystem.trails.push(trail);
+            
+            // 限制残影数量
+            if (trailSystem.trails.length > CONFIG.maxTrails) {
+                const oldTrail = trailSystem.trails.shift();
+                scene.remove(oldTrail.mesh);
+                oldTrail.mesh.geometry.dispose();
+                oldTrail.mesh.material.dispose();
+            }
+        }
+
+        // ==================== 鼠标事件处理（桌面端兼容） ====================
+        function setupMouseEvents() {
+            let isMouseDown = false;
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                isMouseDown = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            renderer.domElement.addEventListener('mousemove', (e) => {
+                if (isMouseDown) {
+                    const deltaX = e.clientX - lastMouseX;
+                    const deltaY = e.clientY - lastMouseY;
+                    
+                    const spherical = new THREE.Spherical();
+                    spherical.setFromVector3(camera.position);
+                    spherical.theta -= deltaX * CONFIG.rotationSpeed * 0.01;
+                    spherical.phi += deltaY * CONFIG.rotationSpeed * 0.01;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+                    
+                    camera.position.setFromSpherical(spherical);
+                    camera.lookAt(0, 0, 0);
+                    
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                }
+            });
+
+            renderer.domElement.addEventListener('mouseup', () => {
+                isMouseDown = false;
+            });
+
+            renderer.domElement.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY * 0.01;
+                const newDistance = camera.position.length() + delta * 50;
+                const clampedDistance = Math.max(200, Math.min(800, newDistance));
+                camera.position.normalize().multiplyScalar(clampedDistance);
+                camera.lookAt(0, 0, 0);
+            }, { passive: false });
+        }
+
+        // ==================== 粒子系统 ====================
+        // 创建高级发光纹理（多边形/渐变光球）
+        function createGlowTexture() {
+            const canvas = document.createElement('canvas');
+            const size = 128; // 提高分辨率以获得更好的发光效果
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // 绘制多边形发光（六边形）
+            const center = size / 2;
+            const radius = size / 2 - 2;
+            const sides = 6;
+            
+            ctx.beginPath();
+            for (let i = 0; i <= sides; i++) {
+                const angle = (Math.PI * 2 * i) / sides - Math.PI / 2;
+                const x = center + radius * Math.cos(angle);
+                const y = center + radius * Math.sin(angle);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            
+            // 径向渐变（中心亮，边缘透明）
+            const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // 创建粒子系统（支持Z轴分层）
+        function createParticles(positions, colors, isEdge = null) {
+            if (particlesMesh) {
+                scene.remove(particlesMesh);
+                particlesMesh.geometry.dispose();
+                particlesMesh.material.dispose();
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            
+            // 添加自定义属性：大小、透明度、速度（用于动态辉光）
+            const sizes = new Float32Array(positions.length / 3);
+            const opacities = new Float32Array(positions.length / 3);
+            const velocities = new Float32Array(positions.length / 3);
+            
+            for (let i = 0; i < positions.length / 3; i++) {
+                // Z轴分层：根据Z坐标分配层
+                const z = positions[i * 3 + 2];
+                const normalizedZ = (z + CONFIG.sphereRadius) / (CONFIG.sphereRadius * 2);
+                const layer = Math.floor(normalizedZ * CONFIG.layerCount);
+                const layerProgress = (normalizedZ * CONFIG.layerCount) % 1;
+                
+                // 近层大且亮，远层小且透明
+                const baseSize = CONFIG.particleSize;
+                sizes[i] = baseSize * (1 - layerProgress * 0.5);
+                opacities[i] = 1 - layerProgress * 0.6;
+                
+                // 边缘粒子特殊处理
+                if (isEdge && isEdge[i]) {
+                    sizes[i] *= 1.2; // 边缘粒子稍大
+                    opacities[i] = Math.min(1, opacities[i] * CONFIG.neonOutlineBrightness);
+                }
+                
+                velocities[i] = 0; // 初始速度
+            }
+            
+            geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+            geometry.setAttribute('opacity', new THREE.Float32BufferAttribute(opacities, 1));
+            geometry.setAttribute('velocity', new THREE.Float32BufferAttribute(velocities, 1));
+
+            // 使用ShaderMaterial实现更高级的效果（如果性能允许）
+            const material = new THREE.PointsMaterial({
+                size: CONFIG.particleSize,
+                sizeAttenuation: true,
+                map: createGlowTexture(),
+                vertexColors: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.9
+            });
+
+            particlesMesh = new THREE.Points(geometry, material);
+            scene.add(particlesMesh);
+        }
+
+        // ==================== 创建默认粒子效果 ====================
+        function createDefaultParticles() {
+            particleData = [];
+            const positions = [];
+            const colors = [];
+            const isEdge = [];
+
+            const count = CONFIG.particleCount;
+            const radius = CONFIG.sphereRadius;
+            
+            const color1 = new THREE.Color(0x00ffff);
+            const color2 = new THREE.Color(0xff00cc);
+
+            for (let i = 0; i < count; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.sin(phi) * Math.sin(theta);
+                const z = radius * Math.cos(phi);
+
+                positions.push(x, y, z);
+
+                const alpha = (y + radius) / (radius * 2);
+                const color = color1.clone().lerp(color2, alpha);
+                colors.push(color.r, color.g, color.b);
+
+                // 随机标记10%为闪烁粒子
+                const isTwinkle = Math.random() < CONFIG.twinkleRatio;
+                
+                particleData.push({
+                    baseX: x, baseY: y, baseZ: z,
+                    x: x, y: y, z: z,
+                    targetColor: { r: color.r, g: color.g, b: color.b },
+                    currentColor: { r: color.r, g: color.g, b: color.b },
+                    colorTransitionTime: 0,
+                    isTwinkle: isTwinkle,
+                    twinklePhase: Math.random() * Math.PI * 2,
+                    isEdge: Math.random() < 0.15, // 15%标记为边缘
+                    velocity: 0, // 运动速度（用于辉光）
+                    noiseOffset: Math.random() * Math.PI * 2 // 随机微震相位
+                });
+                
+                isEdge.push(particleData[i].isEdge);
+            }
+
+            createParticles(positions, colors, isEdge);
+            updateParticleCountDisplay();
+        }
+
+        // ==================== 图片处理 ====================
+        function handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            loadingDiv.style.display = 'block';
+            animationState.isLoading = true;
+            animationState.loadTime = 0;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    createParticlesFromImage(img);
+                };
+                img.onerror = function() {
+                    loadingDiv.style.display = 'none';
+                    animationState.isLoading = false;
+                    alert('图片加载失败，请重试');
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // ==================== 从图片创建粒子（放射状扩散加载动画） ====================
+        function createParticlesFromImage(image) {
+            particleData = [];
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const maxSize = CONFIG.imageMaxSize;
+            let width = image.width;
+            let height = image.height;
+            const scale = Math.min(1, maxSize / Math.max(width, height));
+            width = Math.floor(width * scale);
+            height = Math.floor(height * scale);
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            ctx.drawImage(image, 0, 0, width, height);
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+
+            const sphereGeo = new THREE.SphereGeometry(CONFIG.sphereRadius, 64, 64);
+            const vertices = sphereGeo.attributes.position.array;
+            const uvs = sphereGeo.attributes.uv.array;
+
+            const positions = [];
+            const colors = [];
+            const isEdge = [];
+            const particleCount = Math.min(CONFIG.particleCount, vertices.length / 3);
+            const step = Math.floor(vertices.length / 3 / particleCount);
+
+            // 检测边缘像素
+            const edgeMap = new Set();
+            for (let py = 0; py < height; py++) {
+                for (let px = 0; px < width; px++) {
+                    if (isEdgePixel(data, px, py, width, height)) {
+                        edgeMap.add(`${px},${py}`);
+                    }
+                }
+            }
+
+            for (let i = 0; i < particleCount; i++) {
+                const idx = i * step * 3;
+                const x = vertices[idx];
+                const y = vertices[idx + 1];
+                const z = vertices[idx + 2];
+
+                const uvIdx = i * step * 2;
+                const u = uvs[uvIdx];
+                const v = uvs[uvIdx + 1];
+
+                const pixelX = Math.floor(u * (width - 1));
+                const pixelY = Math.floor((1 - v) * (height - 1));
+                const pixelIdx = (pixelX + pixelY * width) * 4;
+
+                // 检查是否为边缘
+                const isEdgeParticle = edgeMap.has(`${pixelX},${pixelY}`);
+                isEdge.push(isEdgeParticle);
+
+                // 初始位置设为屏幕中心（用于放射状扩散）
+                const centerX = 0;
+                const centerY = 0;
+                const centerZ = 0;
+                positions.push(centerX, centerY, centerZ);
+
+                // 目标位置
+                const targetX = x;
+                const targetY = y;
+                const targetZ = z;
+
+                // 从图片获取颜色并转换为HSV
+                const r = data[pixelIdx] / 255;
+                const g = data[pixelIdx + 1] / 255;
+                const b = data[pixelIdx + 2] / 255;
+                
+                // HSV微调（增强饱和度）
+                const hsv = rgbToHsv(r * 255, g * 255, b * 255);
+                hsv.s = Math.min(1, hsv.s * 1.2); // 提高饱和度
+                const adjustedRgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+                
+                // 边缘粒子使用霓虹色
+                let finalR = adjustedRgb.r;
+                let finalG = adjustedRgb.g;
+                let finalB = adjustedRgb.b;
+                
+                if (isEdgeParticle && CONFIG.enableNeonOutline) {
+                    // 霓虹描边：蓝色/紫色混合
+                    const neonMix = 0.6;
+                    finalR = finalR * (1 - neonMix) + 0 * neonMix;
+                    finalG = finalG * (1 - neonMix) + 0.95 * neonMix;
+                    finalB = finalB * (1 - neonMix) + 1 * neonMix;
+                }
+                
+                colors.push(finalR, finalG, finalB);
+
+                const isTwinkle = Math.random() < CONFIG.twinkleRatio;
+                
+                particleData.push({
+                    baseX: targetX, baseY: targetY, baseZ: targetZ,
+                    x: centerX, y: centerY, z: centerZ, // 初始位置在中心
+                    targetColor: { r: finalR, g: finalG, b: finalB },
+                    currentColor: { r: 0, g: 0, b: 0 }, // 初始颜色为黑
+                    colorTransitionTime: 0,
+                    isTwinkle: isTwinkle,
+                    twinklePhase: Math.random() * Math.PI * 2,
+                    isEdge: isEdgeParticle,
+                    velocity: 0,
+                    noiseOffset: Math.random() * Math.PI * 2,
+                    loadDelay: Math.random() * CONFIG.loadAnimation // 加载延迟（实现放射状扩散）
+                });
+            }
+
+            sphereGeo.dispose();
+            createParticles(positions, colors, isEdge);
+            updateParticleCountDisplay();
+            
+            // 开始加载动画
+            animationState.loadTime = 0;
+        }
+
+        // ==================== 参数调节 ====================
+        function handleParamChange(e) {
+            const btn = e.target;
+            const value = parseInt(btn.dataset.value);
+            
+            document.querySelectorAll('.param-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            CONFIG.particleCount = value;
+            
+            if (particlesMesh) {
+                createDefaultParticles();
+            }
+        }
+
+        // ==================== 暂停/恢复 ====================
+        function togglePause() {
+            isPaused = !isPaused;
+            hintDiv.textContent = isPaused ? '⏸️ 已暂停 | 长按恢复' : '👆 单指拖拽旋转 | 🤏 双指缩放 | ⏸️ 长按暂停';
+            hintDiv.style.display = 'block';
+            hintDiv.style.opacity = '1';
+            setTimeout(() => {
+                hintDiv.style.opacity = '0';
+                setTimeout(() => hintDiv.style.display = 'none', 500);
+            }, 2000);
+        }
+
+        // ==================== 动画循环 ====================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const currentTime = performance.now();
+            const deltaTime = Math.min((currentTime - lastFrameTime) / 1000, 0.1); // 限制最大deltaTime
+            lastFrameTime = currentTime;
+
+            if (!particlesMesh || isPaused) {
+                // 更新残影
+                updateTrails(deltaTime);
+                renderer.render(scene, camera);
+                return;
+            }
+
+            time += CONFIG.breathingSpeed * deltaTime * 60; // 标准化到60fps
+
+            // 自动旋转
+            particlesMesh.rotation.y += CONFIG.autoRotateSpeed * deltaTime * 60;
+
+            // 处理加载动画
+            if (animationState.isLoading) {
+                animationState.loadTime += deltaTime;
+                const loadProgress = Math.min(1, animationState.loadTime / CONFIG.loadAnimation);
+                
+                if (loadProgress >= 1) {
+                    animationState.isLoading = false;
+                    loadingDiv.style.display = 'none';
+                }
+            }
+
+            // 处理爆炸动画
+            if (animationState.isExploding) {
+                animationState.explosionTime += deltaTime;
+                const progress = Math.min(1, animationState.explosionTime / CONFIG.explosionDuration);
+                
+                if (progress >= 1) {
+                    animationState.isExploding = false;
+                }
+            }
+
+            // 处理缩放动画（弹性效果）
+            if (animationState.zoomTarget !== null) {
+                animationState.zoomTime += deltaTime;
+                const progress = Math.min(1, animationState.zoomTime / CONFIG.zoomAnimation);
+                
+                // 弹性缓动函数
+                const eased = 1 - Math.pow(1 - progress, 3);
+                const currentDist = lerp(animationState.zoomStart, animationState.zoomTarget, eased);
+                
+                camera.position.normalize().multiplyScalar(currentDist);
+                camera.lookAt(0, 0, 0);
+                
+                if (progress >= 1) {
+                    animationState.zoomTarget = null;
+                }
+            }
+
+            // 更新粒子
+            const positions = particlesMesh.geometry.attributes.position.array;
+            const colorArray = particlesMesh.geometry.attributes.color.array;
+            const breatheFactor = 1 + Math.sin(time * 5) * CONFIG.breathingRange;
+
+            for (let i = 0; i < particleData.length; i++) {
+                const data = particleData[i];
+                
+                // 加载动画：放射状扩散
+                if (animationState.isLoading) {
+                    const loadProgress = Math.min(1, (animationState.loadTime - data.loadDelay) / (CONFIG.loadAnimation - data.loadDelay));
+                    if (loadProgress > 0 && loadProgress < 1) {
+                        const eased = 1 - Math.pow(1 - loadProgress, 2); // easeOut
+                        data.x = lerp(0, data.baseX, eased);
+                        data.y = lerp(0, data.baseY, eased);
+                        data.z = lerp(0, data.baseZ, eased);
+                    } else if (loadProgress >= 1) {
+                        data.x = data.baseX;
+                        data.y = data.baseY;
+                        data.z = data.baseZ;
+                    }
+                }
+                // 爆炸动画
+                else if (animationState.isExploding && data.explosionVelocity) {
+                    const progress = Math.min(1, animationState.explosionTime / CONFIG.explosionDuration);
+                    const eased = 1 - progress; // 从1到0
+                    
+                    const explosionDist = eased * 50; // 爆炸距离
+                    data.x = data.explosionStart.x + data.explosionVelocity.x * eased;
+                    data.y = data.explosionStart.y + data.explosionVelocity.y * eased;
+                    data.z = data.explosionStart.z + data.explosionVelocity.z * eased;
+                    
+                    // 爆炸后回归
+                    if (progress < 0.7) {
+                        const returnProgress = (0.7 - progress) / 0.7;
+                        data.x += (data.baseX - data.x) * (1 - returnProgress) * 0.1;
+                        data.y += (data.baseY - data.y) * (1 - returnProgress) * 0.1;
+                        data.z += (data.baseZ - data.z) * (1 - returnProgress) * 0.1;
+                    }
+                }
+                // 正常呼吸+随机微震
+                else {
+                    const targetX = data.baseX * breatheFactor;
+                    const targetY = data.baseY * breatheFactor;
+                    const targetZ = data.baseZ * breatheFactor;
+                    
+                    // 随机微震（布朗运动）
+                    const noiseX = Math.sin(time * 2 + data.noiseOffset) * 2;
+                    const noiseY = Math.cos(time * 2.3 + data.noiseOffset) * 2;
+                    const noiseZ = Math.sin(time * 1.7 + data.noiseOffset) * 2;
+                    
+                    data.x += (targetX + noiseX - data.x) * 0.1;
+                    data.y += (targetY + noiseY - data.y) * 0.1;
+                    data.z += (targetZ + noiseZ - data.z) * 0.1;
+                    
+                    // 计算速度（用于动态辉光）
+                    const dx = data.x - (positions[i * 3] || data.x);
+                    const dy = data.y - (positions[i * 3 + 1] || data.y);
+                    const dz = data.z - (positions[i * 3 + 2] || data.z);
+                    data.velocity = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                }
+
+                positions[i * 3] = data.x;
+                positions[i * 3 + 1] = data.y;
+                positions[i * 3 + 2] = data.z;
+
+                // 色彩过渡动画
+                data.colorTransitionTime += deltaTime;
+                if (data.colorTransitionTime < CONFIG.colorTransition) {
+                    const t = data.colorTransitionTime / CONFIG.colorTransition;
+                    data.currentColor.r = lerp(data.currentColor.r, data.targetColor.r, t);
+                    data.currentColor.g = lerp(data.currentColor.g, data.targetColor.g, t);
+                    data.currentColor.b = lerp(data.currentColor.b, data.targetColor.b, t);
+                } else {
+                    data.currentColor = { ...data.targetColor };
+                }
+
+                // 闪烁效果（10%的粒子）
+                let brightness = 1;
+                if (data.isTwinkle && CONFIG.enableTwinkle) {
+                    const twinkle = Math.sin(time * 0.5 + data.twinklePhase) * 0.5 + 0.5;
+                    brightness = 0.5 + twinkle * 0.5; // 50%-100%
+                }
+
+                // 动态辉光（速度越快越亮）
+                const glowFactor = 1 + Math.min(data.velocity * 0.1, 0.3);
+                brightness *= glowFactor;
+
+                // 应用颜色和亮度
+                colorArray[i * 3] = data.currentColor.r * brightness;
+                colorArray[i * 3 + 1] = data.currentColor.g * brightness;
+                colorArray[i * 3 + 2] = data.currentColor.b * brightness;
+            }
+
+            particlesMesh.geometry.attributes.position.needsUpdate = true;
+            particlesMesh.geometry.attributes.color.needsUpdate = true;
+
+            // 更新残影
+            updateTrails(deltaTime);
+
+            // 横屏优化：调整粒子大小
+            const isLandscape = window.innerWidth > window.innerHeight;
+            if (isLandscape && particlesMesh.material) {
+                particlesMesh.material.size = CONFIG.particleSize * 1.2;
+            } else if (particlesMesh.material) {
+                particlesMesh.material.size = CONFIG.particleSize;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ==================== 更新残影 ====================
+        function updateTrails(deltaTime) {
+            if (!CONFIG.enableTrail) return;
+            
+            for (let i = trailSystem.trails.length - 1; i >= 0; i--) {
+                const trail = trailSystem.trails[i];
+                trail.time += deltaTime;
+                trail.opacity -= CONFIG.trailFade * deltaTime;
+                
+                if (trail.opacity <= 0) {
+                    scene.remove(trail.mesh);
+                    trail.mesh.geometry.dispose();
+                    trail.mesh.material.dispose();
+                    trailSystem.trails.splice(i, 1);
+                } else {
+                    trail.mesh.material.opacity = trail.opacity;
+                }
+            }
+        }
+
+        // ==================== 窗口大小改变 ====================
+        function onWindowResize() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+
+        // ==================== 更新粒子数量显示 ====================
+        function updateParticleCountDisplay() {
+            particleCountDiv.textContent = `粒子: ${particleData.length}`;
+        }
+
+        // ==================== 启动 ====================
+        init();
+    </script>
+</body>
+</html>
